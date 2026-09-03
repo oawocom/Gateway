@@ -1,0 +1,9 @@
+.env
+node_modules/
+frontend-src/node_modules/
+frontend-src/dist/
+frontend/
+frontend-old-backup/
+gateway-release/
+gateway-release.tar.gz
+*.tar.gz
