@@ -83,6 +83,7 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("GET /api/v1/data/synclog", s.requireTenant(http.HandlerFunc(s.syncLog)))
 	mux.Handle("GET /api/v1/reports/summary", s.requireTenant(http.HandlerFunc(s.reportsSummary)))
 	mux.Handle("GET /api/v1/reports/1c", s.requireTenant(http.HandlerFunc(s.reports1C)))
+	mux.Handle("GET /api/v1/reports/c1/dashboard", s.requireTenant(http.HandlerFunc(s.reportsC1Dashboard)))
 
 	// automations
 	mux.Handle("GET /api/v1/automations", s.requireTenant(http.HandlerFunc(s.listAutomations)))
