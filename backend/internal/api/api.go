@@ -72,6 +72,7 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("POST /api/v1/connections/test", s.requireRole(http.HandlerFunc(s.testConnectionConfig), "owner", "admin"))
 	mux.Handle("POST /api/v1/connections/{id}/test", s.requireRole(http.HandlerFunc(s.testConnection), "owner", "admin"))
 	mux.Handle("GET /api/v1/connections/{id}/entities", s.requireTenant(http.HandlerFunc(s.listConnectionEntities)))
+	mux.Handle("GET /api/v1/connections/{id}/c1meta", s.requireTenant(http.HandlerFunc(s.connectionC1Meta)))
 	mux.Handle("POST /api/v1/connections/{id}/sync", s.requireRole(http.HandlerFunc(s.syncConnection), "owner", "admin"))
 	mux.Handle("DELETE /api/v1/connections/{id}", s.requireRole(http.HandlerFunc(s.deleteConnection), "owner", "admin"))
 
