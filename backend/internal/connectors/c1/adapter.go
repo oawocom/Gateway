@@ -163,4 +163,6 @@ type Aggregates interface {
 	// PaidByNonInvoiced sums payments in [From,To) from payers that have no
 	// invoice at all in the base's history (settlement key per Query).
 	PaidByNonInvoiced(ctx context.Context, q Query) (float64, error)
+	// DataUntil is the date of the latest posted invoice or payment in the base.
+	DataUntil(ctx context.Context) (time.Time, error)
 }

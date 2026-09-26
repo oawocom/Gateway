@@ -10,6 +10,7 @@ interface KPI {
   collection_rate: number; outstanding: number; overdue: number; overdue_ratio: number; advances: number;
   non_invoiced_balance: number; invoices: number; active_customers: number; new_customers: number;
   lost_customers: number; open_invoices: number;
+  outstanding_start: number; overdue_start: number; outstanding_period: number; overdue_period: number; open_period: number;
 }
 interface MonthRow { year: number; month: number; invoiced: number; net: number; paid: number; invoices: number }
 interface ServiceRow { service_id: string; service: string; category: string; net: number; vat: number; customers: number; lines: number }
@@ -19,7 +20,7 @@ interface OverdueCust { customer_id: string; customer: string; overdue: number; 
 interface Advance { customer_id: string; customer: string; contract_id: string; contract: string; amount: number; non_invoiced: boolean }
 interface Dash {
   info: { adapter: string; config_name: string; config_version: string };
-  period: { from: string; to: string; as_of: string; due_days_default: number };
+  period: { from: string; to: string; as_of: string; data_until: string; due_days_default: number };
   kpi: KPI; monthly: MonthRow[]; services: ServiceRow[]; top_customers: CustomerRow[];
   aging: Bucket[]; top_overdue: OverdueCust[]; advances: Advance[]; other_payers: Advance[];
 }
@@ -33,7 +34,7 @@ const ml = (m: { year: number; month: number }) => `${MONTHS[m.month - 1]} ${Str
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const GOLD = "#f0c000", INK = "#8a8fa3", RED = "#c62828", GRAY = "#e4e6ee", OK = "#16a34a";
 
-// ---- period presets ----
+// ---- period presets, by the calendar (today) ----
 function preset(kind: string): [string, string] {
   const now = new Date();
   const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -45,6 +46,16 @@ function preset(kind: string): [string, string] {
     default: return [iso(add(first, -11)), iso(add(first, 1))];
   }
 }
+
+// last 12 months of data, for the "jump to data" action when the period is empty
+function dataRange(until: string): [string, string] {
+  const u = new Date(until);
+  const first = new Date(Date.UTC(u.getUTCFullYear(), u.getUTCMonth(), 1));
+  const add = (d: Date, m: number) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + m, 1));
+  return [iso(add(first, -11)), iso(add(first, 1))];
+}
+
+const dmy = (s: string) => (s && s.length >= 10 ? `${s.slice(8, 10)}.${s.slice(5, 7)}.${s.slice(0, 4)}` : s);
 
 // previous period of equal length, for KPI comparison
 function previous(from: string, to: string): [string, string] {
@@ -141,6 +152,21 @@ function Kpi({ label, value, prev, help, invert, onClick }: { label: string; val
   );
 }
 
+// stock figure with its opening value: "dövr əvvəli → dövr sonu"
+function Balance({ label, start, end, from, help, onClick }: { label: string; start: number; end: number; from: string; help?: string; onClick?: () => void }) {
+  const diff = end - start;
+  return (
+    <div className="card" title={help} style={{ cursor: onClick ? "pointer" : "default" }} onClick={onClick}>
+      <span>{label}</span>
+      <strong style={{ fontSize: "1.3rem" }}>{azn(end)}</strong>
+      <small style={{ color: "#8b90a3" }}>
+        {from}-ə: {azn(start)} · dəyişim{" "}
+        <b style={{ color: diff > 0 ? RED : diff < 0 ? OK : "#8b90a3" }}>{diff > 0 ? "▲" : diff < 0 ? "▼" : "="} {azn(Math.abs(diff))}</b>
+      </small>
+    </div>
+  );
+}
+
 export default function Dashboard1C() {
   const conns = useQuery({
     queryKey: ["connections"],
@@ -151,7 +177,7 @@ export default function Dashboard1C() {
   const conn = connID || mssql[0]?.id || "";
 
   const [kind, setKind] = useState("12m");
-  const [[from, to], setRange] = useState<[string, string]>(() => preset("12m"));
+  const [[from, to], setRange] = useState<[string, string]>(["", ""]); // empty = server default (last 12 months of data)
   const [customer, setCustomer] = useState<{ id: string; name: string } | null>(null);
   const [detail, setDetail] = useState<"overdue" | "services" | "customers" | "other" | null>(null);
 
@@ -161,11 +187,12 @@ export default function Dashboard1C() {
     queryFn: async () => (await api.get<Dash>("/reports/c1/dashboard", { params: params(from, to) })).data,
     enabled: !!conn, staleTime: 5 * 60 * 1000, retry: false,
   });
-  const [pf, pt] = previous(from, to);
+  const ef = from || cur.data?.period.from || "", et = to || cur.data?.period.to || "";
+  const [pf, pt] = ef && et ? previous(ef, et) : ["", ""];
   const prev = useQuery({
     queryKey: ["c1dash", conn, pf, pt, customer?.id],
     queryFn: async () => (await api.get<Dash>("/reports/c1/dashboard", { params: params(pf, pt) })).data,
-    enabled: !!conn, staleTime: 5 * 60 * 1000, retry: false,
+    enabled: !!conn && !!pf, staleTime: 5 * 60 * 1000, retry: false,
   });
 
   if (conns.isLoading) return <p>Yüklənir...</p>;
@@ -181,8 +208,10 @@ export default function Dashboard1C() {
   const err = (cur.error as any)?.response?.data?.error ?? (cur.error as any)?.message;
 
   const apply = (kk: string) => { setKind(kk); setRange(preset(kk)); };
-  const setFrom = (v: string) => { setKind("custom"); setRange([v, to]); };
-  const setTo = (v: string) => { setKind("custom"); setRange([from, v]); };
+  const jumpToData = () => { if (d?.period.data_until) { setKind("custom"); setRange(dataRange(d.period.data_until)); } };
+  const emptyPeriod = !!d && d.monthly.length === 0;
+  const setFrom = (v: string) => { setKind("custom"); setRange([v, et]); };
+  const setTo = (v: string) => { setKind("custom"); setRange([ef, v]); };
 
   return (
     <>
@@ -191,7 +220,7 @@ export default function Dashboard1C() {
           <h1>Rəhbər paneli</h1>
           <p className="page-sub">
             1C mühasibatından canlı — {d ? `${d.info.config_name} ${d.info.config_version}` : "…"}
-            {d && ` · qalıqlar ${d.period.as_of} tarixinə · ödəniş müddəti default ${d.period.due_days_default} gün`}
+            {d && ` · bazada son məlumat ${dmy(d.period.data_until)} · ödəniş müddəti default ${d.period.due_days_default} gün`}
           </p>
         </div>
         {mssql.length > 1 && (
@@ -210,9 +239,9 @@ export default function Dashboard1C() {
             ))}
           </div>
           <div style={{ display: "flex", gap: ".5rem", alignItems: "center", fontSize: ".85rem" }}>
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ padding: ".4rem .6rem", border: "1px solid #dfe2ea" }} />
+            <input type="date" value={ef} onChange={(e) => setFrom(e.target.value)} style={{ padding: ".4rem .6rem", border: "1px solid #dfe2ea" }} />
             <span>—</span>
-            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ padding: ".4rem .6rem", border: "1px solid #dfe2ea" }} />
+            <input type="date" value={et} onChange={(e) => setTo(e.target.value)} style={{ padding: ".4rem .6rem", border: "1px solid #dfe2ea" }} />
             {customer && (
               <button className="chip on" onClick={() => setCustomer(null)} title="Müştəri filtrini sil">
                 {customer.name.slice(0, 28)} ✕
@@ -226,6 +255,18 @@ export default function Dashboard1C() {
       {err && <p className="error" style={{ marginTop: "1rem" }}>{err}</p>}
       {cur.isLoading && <p style={{ marginTop: "1rem" }}>1C-dən hesablanır…</p>}
 
+      {d && emptyPeriod && (
+        <div className="panel" style={{ marginTop: "1rem", borderLeft: `4px solid ${RED}` }}>
+          <div className="panel-head" style={{ gap: "1rem" }}>
+            <div>
+              <strong>Seçilən dövr üçün 1C-də sənəd yoxdur.</strong>
+              <div className="page-sub">Bazada son məlumat: {dmy(d.period.data_until)}. Aşağıdakı qalıq kartları {dmy(d.period.as_of)} tarixinə hesablanıb.</div>
+            </div>
+            <button className="btn-primary sm" onClick={jumpToData}>Son məlumat dövrünə keç</button>
+          </div>
+        </div>
+      )}
+
       {d && k && (
         <>
           {/* 2. KPI cards (doc §3.1 / §13.2) */}
@@ -234,8 +275,8 @@ export default function Dashboard1C() {
             <Kpi label="Hesablanmış (ƏDV ilə)" value={azn(k.invoiced)} prev={delta(k.invoiced, pk?.invoiced)} help={`${num(k.invoices)} invoice`} />
             <Kpi label="Ödənilmiş — korporativ" value={azn(k.paid_invoiced)} prev={delta(k.paid_invoiced, pk?.paid_invoiced)} help="Invoice-lu müştərilərdən daxil olan" />
             <Kpi label="Yığım faizi" value={pct(k.collection_rate)} prev={delta(k.collection_rate, pk?.collection_rate)} help="Ödənilmiş (korporativ) / Hesablanmış" />
-            <Kpi label="Ödənilməmiş məbləğ" value={azn(k.outstanding)} help={`${num(k.open_invoices)} açıq invoice`} onClick={() => setDetail("overdue")} />
-            <Kpi label="Gecikmiş ödənişlər" value={azn(k.overdue)} help={`Overdue ratio ${pct(k.overdue_ratio)}`} onClick={() => setDetail("overdue")} />
+            <Kpi label="Dövrdə hesablanıb, ödənilməyib" value={azn(k.outstanding_period)} help={`Dövrün invoice-larından qalan · ${num(k.open_period)} invoice`} onClick={() => setDetail("overdue")} />
+            <Kpi label="Ondan gecikmiş" value={azn(k.overdue_period)} help="Dövrün invoice-larından ödəniş müddəti keçənlər" onClick={() => setDetail("overdue")} />
             <Kpi label="Aktiv müştərilər" value={num(k.active_customers)} prev={delta(k.active_customers, pk?.active_customers)} help="Dövrdə invoice alan unikal müştərilər" />
             <Kpi label="Yeni / itirilmiş" value={`${num(k.new_customers)} / ${num(k.lost_customers)}`} help="Əvvəlki bərabər dövrə nisbətən" />
           </div>
@@ -243,6 +284,10 @@ export default function Dashboard1C() {
             <Kpi label="Ödəniş sistemləri / B2C daxilolma" value={azn(k.paid_non_invoiced)} prev={delta(k.paid_non_invoiced, pk?.paid_non_invoiced)} help="1C-də invoice-u olmayan ödəyicilərdən" onClick={() => setDetail("other")} />
             <Kpi label="Ümumi daxilolma" value={azn(k.paid)} prev={delta(k.paid, pk?.paid)} help="Korporativ + ödəniş sistemləri" />
             <Kpi label="Müştəri avansları" value={azn(k.advances)} help="Invoice-dan artıq ödənilmiş məbləğlər" />
+          </div>
+          <div className="cards" style={{ marginTop: ".8rem" }}>
+            <Balance label={`Ümumi qalıq (${dmy(d.period.as_of)}-ə)`} start={k.outstanding_start} end={k.outstanding} from={dmy(d.period.from)} help={`${num(k.open_invoices)} açıq invoice, bütün tarix üzrə`} onClick={() => setDetail("overdue")} />
+            <Balance label={`Ondan gecikmiş (${dmy(d.period.as_of)}-ə)`} start={k.overdue_start} end={k.overdue} from={dmy(d.period.from)} help={`Overdue ratio ${pct(k.overdue_ratio)}`} onClick={() => setDetail("overdue")} />
           </div>
 
           {/* 3. revenue analytics */}

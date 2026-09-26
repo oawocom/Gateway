@@ -42,7 +42,15 @@ func (s *Server) reportsC1Dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := r.Context()
 	now := time.Now().UTC()
+	// informational: the last month with normal activity in the base
+	dataUntil, err := ag.DataUntil(ctx)
+	if err != nil {
+		errJSON(w, 502, "data until: "+err.Error())
+		return
+	}
+	// default period: last 12 calendar months including the current one
 	to := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 0)
 	from := to.AddDate(-1, 0, 0)
 	if t, e := time.Parse("2006-01-02", qs.Get("from")); e == nil {
@@ -56,7 +64,6 @@ func (s *Server) reportsC1Dashboard(w http.ResponseWriter, r *http.Request) {
 		dueDays = d
 	}
 	q := c1.Query{From: from, To: to, CustomerID: qs.Get("customer"), DefaultDueDays: dueDays, SettleByContract: qs.Get("settle") == "contract"}
-	ctx := r.Context()
 
 	monthly, err := ag.Monthly(ctx, q)
 	if err != nil {
@@ -84,6 +91,12 @@ func (s *Server) reportsC1Dashboard(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 502, "open invoices: "+err.Error())
 		return
 	}
+	// opening balance: same computation as of the day before the period
+	openStart, _, err := ag.OpenInvoices(ctx, q, from.AddDate(0, 0, -1))
+	if err != nil {
+		errJSON(w, 502, "open invoices (start): "+err.Error())
+		return
+	}
 	cur, prev, err := ag.CustomerActivity(ctx, q)
 	if err != nil {
 		errJSON(w, 502, "customer activity: "+err.Error())
@@ -100,6 +113,16 @@ func (s *Server) reportsC1Dashboard(w http.ResponseWriter, r *http.Request) {
 		invCount += m.Invoices
 	}
 	var outstanding, overdue, advanceTotal float64
+	var outstandingStart, overdueStart float64
+	for _, o := range openStart {
+		outstandingStart += o.Outstanding
+		if o.DaysOverdue > 0 {
+			overdueStart += o.Outstanding
+		}
+	}
+	// invoices issued inside the period that are still (partly) unpaid
+	var outstandingPeriod, overduePeriod float64
+	var openPeriodCount int
 	buckets := map[string]*bucket{
 		"current": {Label: "Vaxtı çatmayıb"}, "1_30": {Label: "1–30 gün"}, "31_60": {Label: "31–60 gün"},
 		"61_90": {Label: "61–90 gün"}, "90_plus": {Label: "90+ gün"},
@@ -107,6 +130,13 @@ func (s *Server) reportsC1Dashboard(w http.ResponseWriter, r *http.Request) {
 	byCust := map[string]*overdueCust{}
 	for _, o := range open {
 		outstanding += o.Outstanding
+		if !o.Date.Before(from) && o.Date.Before(to) {
+			outstandingPeriod += o.Outstanding
+			openPeriodCount++
+			if o.DaysOverdue > 0 {
+				overduePeriod += o.Outstanding
+			}
+		}
 		k := "current"
 		switch {
 		case o.DaysOverdue <= 0:
@@ -184,7 +214,7 @@ func (s *Server) reportsC1Dashboard(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, 200, map[string]any{
 		"info":   ad.Info(),
-		"period": map[string]any{"from": from.Format("2006-01-02"), "to": to.Format("2006-01-02"), "as_of": asOf.Format("2006-01-02"), "due_days_default": dueDays, "settle_by": map[bool]string{false: "customer", true: "contract"}[q.SettleByContract]},
+		"period": map[string]any{"from": from.Format("2006-01-02"), "to": to.Format("2006-01-02"), "as_of": asOf.Format("2006-01-02"), "data_until": dataUntil.Format("2006-01-02"), "due_days_default": dueDays, "settle_by": map[bool]string{false: "customer", true: "contract"}[q.SettleByContract]},
 		"kpi": map[string]any{
 			"invoiced":             round2(invoiced),     // hesablanmış (ƏDV daxil)
 			"revenue_net":          round2(net),          // gəlir, ƏDV-siz
@@ -195,6 +225,11 @@ func (s *Server) reportsC1Dashboard(w http.ResponseWriter, r *http.Request) {
 			"outstanding":          round2(outstanding),  // qalıq — bütün açıq invoice-lar (as_of)
 			"overdue":              round2(overdue),
 			"overdue_ratio":        round1(overdueRatio),
+			"outstanding_start":    round2(outstandingStart), // eyni göstərici dövr əvvəlinə
+			"overdue_start":        round2(overdueStart),
+			"outstanding_period":   round2(outstandingPeriod), // dövrdə hesablanıb, hələ ödənilməyib
+			"overdue_period":       round2(overduePeriod),
+			"open_period":          openPeriodCount,
 			"advances":             round2(advanceTotal), // invoice-lu müştərilərin artıq ödəməsi (real avans)
 			"non_invoiced_balance": round2(nonInvoiced),  // invoice-suz ödəyicilərin tarixi cəmi
 			"invoices":             invCount,

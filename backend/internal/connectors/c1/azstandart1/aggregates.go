@@ -2,6 +2,7 @@ package azstandart1
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -341,4 +342,27 @@ func (a *adapter) PaidByNonInvoiced(ctx context.Context, q c1.Query) (float64, e
 	var v float64
 	err := a.db.QueryRowContext(ctx, sqlq, args...).Scan(&v)
 	return v, err
+}
+
+func (a *adapter) DataUntil(ctx context.Context) (time.Time, error) {
+	// last month with real activity (>= 5 posted invoices), so a stray test
+	// document dated in the future does not define "the end of the data"
+	var y, m int
+	q := fmt.Sprintf(`SELECT TOP 1 YEAR(_Date_Time), MONTH(_Date_Time) FROM [%s]
+		WHERE _Posted=0x01 AND _Marked=0x00
+		GROUP BY YEAR(_Date_Time), MONTH(_Date_Time) HAVING COUNT(*) >= 5
+		ORDER BY YEAR(_Date_Time) DESC, MONTH(_Date_Time) DESC`, a.tInv)
+	err := a.db.QueryRowContext(ctx, q).Scan(&y, &m)
+	if err == sql.ErrNoRows {
+		var t sql.NullTime
+		if err := a.db.QueryRowContext(ctx, fmt.Sprintf(`SELECT MAX(_Date_Time) FROM [%s] WHERE _Posted=0x01 AND _Marked=0x00`, a.tInv)).Scan(&t); err != nil || !t.Valid {
+			return time.Time{}, err
+		}
+		return a.unshift(t.Time), nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	// last day of that month, in real years
+	return time.Date(y-a.offset, time.Month(m), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, -1), nil
 }
