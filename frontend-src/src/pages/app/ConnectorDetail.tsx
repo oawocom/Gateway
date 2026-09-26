@@ -1,37 +1,43 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { api } from "../../lib/api";
 import { useAuth } from "../../store/auth";
 import Modal from "../../components/Modal";
 import C1SyncPanel from "../../components/C1SyncPanel";
 import { Ic, connMeta } from "../../components/Icons";
-import { cardTypeOf } from "../../components/ConnectModal";
+import ConnectModal, { cardTypeOf } from "../../components/ConnectModal";
+import C1AggSettings from "../../components/C1AggSettings";
+import type { Connector } from "../../components/ConnectModal";
 
 interface Conn {
   id: string; name: string; connector_type: string; source?: string; status: string;
   last_sync_at: string | null; last_error: string | null; created_at: string;
 }
 
-export default function Connections() {
+export default function ConnectorDetail() {
+  const { type = "" } = useParams();
   const me = useAuth((s) => s.user);
   const qc = useQueryClient();
+  const [adding, setAdding] = useState(false);
   const [entConn, setEntConn] = useState<Conn | null>(null);
+  const [cfgConn, setCfgConn] = useState<Conn | null>(null);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
 
-  const { data, isLoading } = useQuery({
+  const { data: catalog } = useQuery({
+    queryKey: ["connectors"],
+    queryFn: async () => (await api.get<{ connectors: Connector[] }>("/connectors")).data.connectors,
+  });
+  const { data: conns, isLoading } = useQuery({
     queryKey: ["connections"],
     queryFn: async () => (await api.get<{ connections: Conn[] }>("/connections")).data.connections,
   });
 
-  const entities = useQuery({
-    queryKey: ["entities", entConn?.id],
-    queryFn: async () => (await api.get<{ entities: string[] }>(`/connections/${entConn!.id}/entities`)).data.entities,
-    enabled: !!entConn,
-  });
-
+  const connector = catalog?.find((c) => c.type === type);
+  const mine = (conns ?? []).filter((c) => cardTypeOf(c) === type);
   const canManage = me?.role === "owner" || me?.role === "admin";
+  const meta = connMeta[type] ?? { icon: "🔌", tint: "#f2f3f8" };
 
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
   const renameMut = useMutation({
@@ -47,10 +53,17 @@ export default function Connections() {
     mutationFn: (id: string) => api.post(`/connections/${id}/test`),
     onSuccess: (r) => setMsg(r.data.ok ? "✓ " + r.data.message : "✗ " + r.data.message),
   });
-
   const delMut = useMutation({
     mutationFn: (id: string) => api.delete(`/connections/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["connections"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["connections"] });
+      qc.invalidateQueries({ queryKey: ["c1-menu"] });
+    },
+  });
+  const entities = useQuery({
+    queryKey: ["entities", entConn?.id],
+    queryFn: async () => (await api.get<{ entities: string[] }>(`/connections/${entConn!.id}/entities`)).data.entities,
+    enabled: !!entConn,
   });
 
 
@@ -84,32 +97,44 @@ export default function Connections() {
     }
   }
 
+  if (!connector && catalog) {
+    return <div className="empty-state"><h3>Connector tapılmadı</h3><Link className="btn-primary" to="/integrations">{Ic.store} İnteqrasiyalar</Link></div>;
+  }
+
   return (
     <>
+      <p className="page-sub"><Link to="/integrations" style={{ color: "#8b90a3" }}>İnteqrasiyalar</Link> / {connector?.name ?? type}</p>
       <div className="page-head">
-        <div>
-          <h1>Bağlantılarım</h1>
-          <p className="page-sub">Qoşulmuş sistemlər və sinxronizasiya</p>
+        <div style={{ display: "flex", gap: ".9rem", alignItems: "center" }}>
+          <span className="cc-tile" style={{ background: meta.tint }}>{meta.icon}</span>
+          <div>
+            <h1 style={{ marginBottom: 0 }}>{connector?.name ?? type}</h1>
+            <p className="page-sub" style={{ marginTop: ".15rem" }}>{connector?.description}</p>
+          </div>
         </div>
-        {canManage && <Link className="btn-primary" to="/integrations">{Ic.plus} Yeni bağlantı</Link>}
+        {canManage && connector?.available && (
+          <button className="btn-primary" onClick={() => setAdding(true)}>{Ic.plus} Yeni bağlantı</button>
+        )}
       </div>
+
       {msg && <p className="info-bar">{msg}</p>}
       {syncConn && <C1SyncPanel connId={syncConn.id} name={syncConn.name} onClose={() => setSyncConn(null)} />}
-      {isLoading ? <p>Yüklənir...</p> : !data?.length ? (
+
+      {isLoading ? <p>Yüklənir...</p> : !mine.length ? (
         <div className="empty-state">
-          <h3>Hələ bağlantı yoxdur</h3>
-          <p>İnteqrasiyalar bölməsindən ilk sisteminizi qoşun.</p>
-          <Link className="btn-primary" to="/integrations">{Ic.store} İnteqrasiyalar</Link>
+          <h3>Bu inteqrasiya üzrə bağlantı yoxdur</h3>
+          <p>İlk bağlantını yaradın — hesabatlar və data avtomatik açılacaq.</p>
+          {canManage && connector?.available && (
+            <button className="btn-primary" onClick={() => setAdding(true)}>{Ic.plus} Yeni bağlantı</button>
+          )}
         </div>
       ) : (
         <div className="conn-list">
-          {data.map((c) => {
-            const meta = connMeta[cardTypeOf(c)] ?? { icon: "🔌", tint: "#f2f3f8" };
-            return (
-              <div key={c.id} className="conn-row">
-                <span className="cc-tile sm" style={{ background: meta.tint }}>{meta.icon}</span>
-                <div className="conn-main">
-                  {editing?.id === c.id ? (
+          {mine.map((c) => (
+            <div key={c.id} className="conn-row">
+              <span className="cc-tile sm" style={{ background: meta.tint }}>{meta.icon}</span>
+              <div className="conn-main">
+                {editing?.id === c.id ? (
                   <span style={{ display: "flex", gap: ".4rem", alignItems: "center" }}>
                     <input autoFocus value={editing.name}
                       onChange={(e) => setEditing({ id: c.id, name: e.target.value })}
@@ -120,32 +145,40 @@ export default function Connections() {
                     <button className="ibtn" title="İmtina" onClick={() => setEditing(null)}>✕</button>
                   </span>
                 ) : <strong>{c.name}</strong>}
-                  <span>
-                    <em className={`dot ${c.last_error ? "error" : "success"}`} />
-                    {c.last_error ? "xəta" : "aktiv"}
-                    {c.last_sync_at && ` · son sinxronizasiya ${new Date(c.last_sync_at).toLocaleString("az")}`}
-                  </span>
-                  {c.last_error && <span className="conn-err">{c.last_error}</span>}
-                </div>
-                {canManage && (
-                  <div className="icon-actions">
-                    <button className="ibtn" title="Adı dəyiş" onClick={() => setEditing({ id: c.id, name: c.name })}>✎</button>
+                <span>
+                  <em className={`dot ${c.last_error ? "error" : "success"}`} />
+                  {c.last_error ? "xəta" : "aktiv"}
+                  {c.last_sync_at && ` · son sinxronizasiya ${new Date(c.last_sync_at).toLocaleString("az")}`}
+                </span>
+                {c.last_error && <span className="conn-err">{c.last_error}</span>}
+              </div>
+              {canManage && (
+                <div className="icon-actions">
+                  {c.source === "1c" && c.connector_type === "mssql" && (
+                    <button className="ibtn" title="1C parametrləri" onClick={() => setCfgConn(c)}>⚙</button>
+                  )}
+                  <button className="ibtn" title="Adı dəyiş" onClick={() => setEditing({ id: c.id, name: c.name })}>✎</button>
                   <button className="ibtn" title="Test et" disabled={testMut.isPending} onClick={() => testMut.mutate(c.id)}>{Ic.test}</button>
-                    <button className="ibtn gold" title={c.source === "1c" && c.connector_type === "mssql" ? "Tam sinxronizasiya" : "Sinxronizasiya"}
+                  <button className="ibtn gold" title={c.source === "1c" && c.connector_type === "mssql" ? "Tam sinxronizasiya" : "Sinxronizasiya"}
                       onClick={() => (c.source === "1c" && c.connector_type === "mssql") ? fullSync(c) : setEntConn(c)}>
                       {Ic.refresh}</button>
-                    <button className="ibtn warn" title="Sil" onClick={() => { if (confirm(`${c.name} silinsin? Bütün sinxronlaşmış data silinəcək.`)) delMut.mutate(c.id); }}>{Ic.trash}</button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                  <button className="ibtn warn" title="Sil" onClick={() => { if (confirm(`${c.name} silinsin? Bütün sinxronlaşmış data silinəcək.`)) delMut.mutate(c.id); }}>{Ic.trash}</button>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
+      {adding && connector && catalog && (
+        <ConnectModal connector={connector} all={catalog} onClose={() => setAdding(false)} />
+      )}
+
+      {cfgConn && <C1AggSettings connId={cfgConn.id} name={cfgConn.name} onClose={() => setCfgConn(null)} />}
+
       {entConn && (
         <Modal title={`${entConn.name} — entity seçin`} onClose={() => setEntConn(null)} wide>
-          {entities.isLoading ? <p>1C-dən entity siyahısı alınır...</p> :
+          {entities.isLoading ? <p>Entity siyahısı alınır...</p> :
            entities.isError ? <p className="error">{(entities.error as any)?.response?.data?.error ?? "Siyahı alına bilmədi"}</p> : (
             <><div>
               <button className="btn-primary sm" style={{ marginBottom: ".6rem" }} disabled={syncing !== null}

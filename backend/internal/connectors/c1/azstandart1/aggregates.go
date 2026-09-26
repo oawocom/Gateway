@@ -13,6 +13,19 @@ import (
 // All aggregates are document-based (invoices, service lines, payments) so the
 // figures reconcile with each other: invoiced − paid = outstanding.
 
+
+// aggSet: configured payment-channel contragents as a lookup set.
+func aggSet(q c1.Query) map[string]bool {
+	if len(q.AggregatorIDs) == 0 {
+		return nil
+	}
+	m := make(map[string]bool, len(q.AggregatorIDs))
+	for _, id := range q.AggregatorIDs {
+		m[strings.ToUpper(id)] = true
+	}
+	return m
+}
+
 func (a *adapter) Monthly(ctx context.Context, q c1.Query) ([]c1.MonthRow, error) {
 	var args []any
 	wInv := a.docFilter(q, a.invCust, &args)
@@ -52,7 +65,8 @@ func (a *adapter) Monthly(ctx context.Context, q c1.Query) ([]c1.MonthRow, error
 
 func (a *adapter) RevenueByService(ctx context.Context, q c1.Query) ([]c1.ServiceRow, error) {
 	var args []any
-	w := a.docFilter(q, a.invCust, &args)
+	w := a.invFilter(q, &args)
+	w += a.svcCond(q, &args)
 	sqlq := fmt.Sprintf(`
 		SELECT l.[%s], ISNULL(n._Description,''), ISNULL(g._Description,''),
 		       SUM(l.[%s]), SUM(l.[%s]), COUNT(DISTINCT d.[%s]), COUNT(*)
@@ -106,6 +120,7 @@ func (a *adapter) TopCustomers(ctx context.Context, q c1.Query) ([]c1.CustomerRo
 		return nil, err
 	}
 	defer rows.Close()
+	agg := aggSet(q)
 	out := []c1.CustomerRow{}
 	for rows.Next() {
 		var r c1.CustomerRow
@@ -114,6 +129,9 @@ func (a *adapter) TopCustomers(ctx context.Context, q c1.Query) ([]c1.CustomerRo
 			return nil, err
 		}
 		r.CustomerID = id(cid)
+		if agg[strings.ToUpper(r.CustomerID)] {
+			continue // payment channel, not a customer
+		}
 		r.Customer, r.VOEN = strings.TrimSpace(r.Customer), strings.TrimSpace(r.VOEN)
 		out = append(out, r)
 	}
@@ -236,10 +254,12 @@ func (a *adapter) OpenInvoices(ctx context.Context, q c1.Query, asOf time.Time) 
 	for _, v := range invs {
 		hasInv[v.key] = true
 	}
+	agg := aggSet(q)
 	adv := []c1.Advance{}
 	for k, left := range remaining {
 		if left > 0.005 {
-			adv = append(adv, c1.Advance{CustomerID: payCust[k], ContractID: k, Amount: left, NonInvoiced: !hasInv[k]})
+			nonInv := !hasInv[k] || agg[strings.ToUpper(payCust[k])] || agg[strings.ToUpper(k)]
+			adv = append(adv, c1.Advance{CustomerID: payCust[k], ContractID: k, Amount: left, NonInvoiced: nonInv})
 		}
 	}
 	if len(adv) > 0 {
@@ -336,9 +356,22 @@ func (a *adapter) PaidByNonInvoiced(ctx context.Context, q c1.Query) (float64, e
 	}
 	var args []any
 	wPay := a.docFilter(q, a.payCust, &args)
-	sqlq := fmt.Sprintf(`SELECT ISNULL(SUM(d.[%s]),0) FROM [%s] d WHERE %s AND NOT EXISTS (
-		SELECT 1 FROM [%s] i WHERE i._Posted=0x01 AND i._Marked=0x00 AND %s = %s)`,
-		a.paySum, a.tPay, wPay, a.tInv, keyPay, strings.Replace(keyInv, "d.[", "i.[", -1))
+	aggCond := ""
+	if len(q.AggregatorIDs) > 0 {
+		ph := []string{}
+		for _, aid := range q.AggregatorIDs {
+			if b, err := idParam(aid); err == nil {
+				args = append(args, b)
+				ph = append(ph, fmt.Sprintf("@p%d", len(args)))
+			}
+		}
+		if len(ph) > 0 {
+			aggCond = fmt.Sprintf(" OR d.[%s] IN (%s)", a.payCust, strings.Join(ph, ","))
+		}
+	}
+	sqlq := fmt.Sprintf(`SELECT ISNULL(SUM(d.[%s]),0) FROM [%s] d WHERE %s AND (NOT EXISTS (
+		SELECT 1 FROM [%s] i WHERE i._Posted=0x01 AND i._Marked=0x00 AND %s = %s)%s)`,
+		a.paySum, a.tPay, wPay, a.tInv, keyPay, strings.Replace(keyInv, "d.[", "i.[", -1), aggCond)
 	var v float64
 	err := a.db.QueryRowContext(ctx, sqlq, args...).Scan(&v)
 	return v, err
@@ -365,4 +398,116 @@ func (a *adapter) DataUntil(ctx context.Context) (time.Time, error) {
 	}
 	// last day of that month, in real years
 	return time.Date(y-a.offset, time.Month(m), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, -1), nil
+}
+
+// ---- Revenue Analytics (§4) aggregates ----
+
+// lineBase builds the FROM/WHERE for line-level revenue queries.
+func (a *adapter) lineBase(q c1.Query, args *[]any) string {
+	w := a.invFilter(q, args) + a.svcCond(q, args)
+	return fmt.Sprintf(`FROM [%s] l JOIN [%s] d ON d._IDRRef = l.[%s_IDRRef] WHERE %s`,
+		a.tInvVT, a.tInv, a.tInv, w)
+}
+
+func (a *adapter) YearlyRevenue(ctx context.Context, q c1.Query) ([]c1.YearRow, error) {
+	q.From, q.To = time.Time{}, time.Time{} // whole base
+	var args []any
+	base := a.lineBase(q, &args)
+	sqlq := fmt.Sprintf(`SELECT YEAR(d._Date_Time), SUM(l.[%s]), COUNT(DISTINCT d.[%s]) %s
+		GROUP BY YEAR(d._Date_Time) ORDER BY 1`, a.vtSum, a.invCust, base)
+	rows, err := a.db.QueryContext(ctx, sqlq, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []c1.YearRow{}
+	for rows.Next() {
+		var r c1.YearRow
+		if err := rows.Scan(&r.Year, &r.Net, &r.Customers); err != nil {
+			return nil, err
+		}
+		r.Year -= a.offset
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (a *adapter) NetByMonth(ctx context.Context, q c1.Query) ([]c1.MonthNet, error) {
+	var args []any
+	base := a.lineBase(q, &args)
+	sqlq := fmt.Sprintf(`SELECT YEAR(d._Date_Time), MONTH(d._Date_Time), SUM(l.[%s]) %s
+		GROUP BY YEAR(d._Date_Time), MONTH(d._Date_Time) ORDER BY 1, 2`, a.vtSum, base)
+	rows, err := a.db.QueryContext(ctx, sqlq, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []c1.MonthNet{}
+	for rows.Next() {
+		var r c1.MonthNet
+		if err := rows.Scan(&r.Year, &r.Month, &r.Net); err != nil {
+			return nil, err
+		}
+		r.Year -= a.offset
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (a *adapter) NetStats(ctx context.Context, q c1.Query) (float64, int, error) {
+	var args []any
+	base := a.lineBase(q, &args)
+	sqlq := fmt.Sprintf(`SELECT coalesce(SUM(l.[%s]),0), COUNT(DISTINCT d.[%s]) %s`, a.vtSum, a.invCust, base)
+	var net float64
+	var customers int
+	err := a.db.QueryRowContext(ctx, sqlq, args...).Scan(&net, &customers)
+	return net, customers, err
+}
+
+func (a *adapter) Managers(ctx context.Context) ([]c1.Ref, error) {
+	sqlq := fmt.Sprintf(`SELECT DISTINCT u._IDRRef, coalesce(u._Description,'')
+		FROM [%s] d JOIN [%s] u ON u._IDRRef = d.[%s]
+		WHERE d._Posted=0x01 AND d._Marked=0x00 ORDER BY 2`, a.tInv, a.tUsers, a.invResp)
+	rows, err := a.db.QueryContext(ctx, sqlq)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []c1.Ref{}
+	for rows.Next() {
+		var rid []byte
+		var r c1.Ref
+		if err := rows.Scan(&rid, &r.Name); err != nil {
+			return nil, err
+		}
+		r.ID = id(rid)
+		r.Name = strings.TrimSpace(r.Name)
+		if r.Name != "" {
+			out = append(out, r)
+		}
+	}
+	return out, rows.Err()
+}
+
+func (a *adapter) CustomerSpans(ctx context.Context) ([]c1.CustomerSpan, error) {
+	sqlq := fmt.Sprintf(`SELECT d.[%s], MIN(d._Date_Time), MAX(d._Date_Time)
+		FROM [%s] d WHERE d._Posted=0x01 AND d._Marked=0x00
+		GROUP BY d.[%s]`, a.invCust, a.tInv, a.invCust)
+	rows, err := a.db.QueryContext(ctx, sqlq)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []c1.CustomerSpan{}
+	for rows.Next() {
+		var cid []byte
+		var sp c1.CustomerSpan
+		if err := rows.Scan(&cid, &sp.First, &sp.Last); err != nil {
+			return nil, err
+		}
+		sp.CustomerID = id(cid)
+		sp.First, sp.Last = a.unshift(sp.First), a.unshift(sp.Last)
+		out = append(out, sp)
+	}
+	return out, rows.Err()
 }

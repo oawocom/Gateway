@@ -1,61 +1,39 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
 import { useAuth } from "../../store/auth";
-import Modal from "../../components/Modal";
 import { Ic, connMeta } from "../../components/Icons";
-import PasswordInput from "../../components/PasswordInput";
+import ConnectModal, { cardTypeOf } from "../../components/ConnectModal";
+import type { Connector } from "../../components/ConnectModal";
 
-interface Field { key: string; label: string; type: string; required: boolean; hint?: string }
-interface Connector {
-  type: string; name: string; description: string;
-  category: string; available: boolean; fields?: Field[];
-}
+interface ConnLite { connector_type: string; source?: string }
 
 export default function Integrations() {
   const me = useAuth((s) => s.user);
   const nav = useNavigate();
-  const qc = useQueryClient();
   const [cat, setCat] = useState("Hamısı");
   const [selected, setSelected] = useState<Connector | null>(null);
-  const [name, setName] = useState("");
-  const [config, setConfig] = useState<Record<string, string>>({});
-  const [testMsg, setTestMsg] = useState<{ ok: boolean; message: string } | null>(null);
-  const [error, setError] = useState("");
 
   const { data, isLoading } = useQuery({
     queryKey: ["connectors"],
     queryFn: async () => (await api.get<{ connectors: Connector[] }>("/connectors")).data.connectors,
   });
+  const { data: conns } = useQuery({
+    queryKey: ["connections"],
+    queryFn: async () => (await api.get<{ connections: ConnLite[] }>("/connections")).data.connections,
+  });
 
-  const cats = ["Hamısı", ...new Set(data?.map((c) => c.category) ?? [])];
-  const shown = data?.filter((c) => cat === "Hamısı" || c.category === cat);
+  const countOf = (type: string) => (conns ?? []).filter((c) => cardTypeOf(c) === type).length;
+
+  const cards = data?.filter((c) => !c.hidden);
+  const cats = ["Hamısı", ...new Set(cards?.map((c) => c.category) ?? [])];
+  const shown = cards?.filter((c) => cat === "Hamısı" || c.category === cat);
   const canManage = me?.role === "owner" || me?.role === "admin";
-
-  const test = useMutation({
-    mutationFn: () => api.post("/connections/test", { connector_type: selected!.type, config }),
-    onSuccess: (r) => setTestMsg(r.data),
-    onError: (e: any) => setTestMsg({ ok: false, message: e.response?.data?.error ?? "Xəta" }),
-  });
-
-  const create = useMutation({
-    mutationFn: () => api.post("/connections", { name, connector_type: selected!.type, config }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["connections"] });
-      setSelected(null);
-      nav("/connections");
-    },
-    onError: (e: any) => setError(e.response?.data?.error ?? "Xəta baş verdi"),
-  });
-
-  function open(c: Connector) {
-    setSelected(c); setName(c.name); setConfig({}); setTestMsg(null); setError("");
-  }
 
   return (
     <>
-      <h1>Marketplace</h1>
+      <h1>İnteqrasiyalar</h1>
       <p className="page-sub">Sistemlərinizi Gateway-ə qoşun — hamısı bir mərkəzdə</p>
 
       <div className="chips">
@@ -68,21 +46,32 @@ export default function Integrations() {
         <div className="grid-cards">
           {shown?.map((c) => {
             const meta = connMeta[c.type] ?? { icon: "🔌", tint: "#f2f3f8" };
+            const n = countOf(c.type);
             return (
-              <div key={c.type} className="connector-card">
+              <div key={c.type} className="connector-card"
+                style={c.available ? { cursor: "pointer" } : undefined}
+                onClick={() => c.available && nav(`/integrations/${c.type}`)}>
                 <div className="cc-top">
                   <span className="cc-tile" style={{ background: meta.tint }}>{meta.icon}</span>
                   <div>
                     <strong>{c.name}</strong>
                     <span className="cc-cat">{c.category}</span>
                   </div>
-                  {c.available && <span className="cc-pop">Aktiv</span>}
+                  {n > 0 && <span className="cc-pop">{n} bağlantı</span>}
                 </div>
                 <p>{c.description}</p>
                 {c.available ? (
-                  canManage
-                    ? <button className="btn-primary w-full" onClick={() => open(c)}>{Ic.plus} Qoş</button>
-                    : <span className="cc-soon">Yalnız admin qoşa bilər</span>
+                  canManage ? (
+                    n > 0 ? (
+                      <button className="btn-primary w-full" onClick={(e) => { e.stopPropagation(); nav(`/integrations/${c.type}`); }}>
+                        Bağlantılara bax
+                      </button>
+                    ) : (
+                      <button className="btn-primary w-full" onClick={(e) => { e.stopPropagation(); setSelected(c); }}>
+                        {Ic.plus} Qoş
+                      </button>
+                    )
+                  ) : <span className="cc-soon">Yalnız admin qoşa bilər</span>
                 ) : (
                   <span className="cc-soon">{Ic.clock} Tezliklə</span>
                 )}
@@ -92,53 +81,10 @@ export default function Integrations() {
         </div>
       )}
 
-      {selected && (
-        <Modal title={`${selected.name} — yeni bağlantı`} onClose={() => setSelected(null)}>
-          <div className="wizard-steps">
-            <span className="ws on">1. Məlumatlar</span>
-            <span className={`ws ${testMsg?.ok ? "on" : ""}`}>2. Test</span>
-            <span className="ws">3. Hazır</span>
-          </div>
-          <label>Bağlantı adı</label>
-          <input value={name} onChange={(e) => setName(e.target.value)} />
-          {selected.fields?.map((f) => (
-            <div key={f.key} className="field">
-              <label>{f.label}</label>
-              {f.type === "password" ? (
-                <PasswordInput
-                  placeholder={f.hint ?? ""}
-                  value={config[f.key] ?? ""}
-                  onChange={(v) => setConfig({ ...config, [f.key]: v })}
-                />
-              ) : f.type === "textarea" ? (
-                <textarea
-                  className="cfg-area"
-                  rows={4}
-                  placeholder={f.hint ?? ""}
-                  value={config[f.key] ?? ""}
-                  onChange={(e) => setConfig({ ...config, [f.key]: e.target.value })}
-                />
-              ) : (
-                <input
-                  type="text"
-                  placeholder={f.hint ?? ""}
-                  value={config[f.key] ?? ""}
-                  onChange={(e) => setConfig({ ...config, [f.key]: e.target.value })}
-                />
-              )}
-            </div>
-          ))}
-          {testMsg && <p className={testMsg.ok ? "ok-msg" : "error"}>{testMsg.ok ? "✓ " : ""}{testMsg.message}</p>}
-          {error && <p className="error">{error}</p>}
-          <div className="modal-actions">
-            <button onClick={() => test.mutate()} disabled={test.isPending}>
-              {Ic.test} {test.isPending ? "Yoxlanılır..." : "Test et"}
-            </button>
-            <button className="btn-primary" onClick={() => create.mutate()} disabled={create.isPending || !testMsg?.ok}>
-              {Ic.check} {create.isPending ? "Yadda saxlanılır..." : "Yadda saxla"}
-            </button>
-          </div>
-        </Modal>
+      {selected && data && (
+        <ConnectModal connector={selected} all={data}
+          onClose={() => setSelected(null)}
+          onCreated={() => nav(`/integrations/${selected.type}`)} />
       )}
     </>
   );

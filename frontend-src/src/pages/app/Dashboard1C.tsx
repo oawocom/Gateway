@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api";
 import { Ic } from "../../components/Icons";
 
@@ -174,7 +175,9 @@ export default function Dashboard1C() {
   });
   const mssql = useMemo(() => (conns.data ?? []).filter((c) => c.connector_type === "mssql"), [conns.data]);
   const [connID, setConnID] = useState("");
-  const conn = connID || mssql[0]?.id || "";
+  const [sp] = useSearchParams();
+  const urlConn = sp.get("connection") ?? "";
+  const conn = connID || urlConn || mssql[0]?.id || "";
 
   const [kind, setKind] = useState("12m");
   const [[from, to], setRange] = useState<[string, string]>(["", ""]); // empty = server default (last 12 months of data)

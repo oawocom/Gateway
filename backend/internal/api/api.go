@@ -63,6 +63,7 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("GET /api/v1/users", s.requireRole(http.HandlerFunc(s.listUsers), "owner", "admin"))
 	mux.Handle("POST /api/v1/users", s.requireRole(http.HandlerFunc(s.createUser), "owner", "admin"))
 	mux.Handle("PATCH /api/v1/users/{id}", s.requireRole(http.HandlerFunc(s.updateUserRole), "owner", "admin"))
+	mux.Handle("PATCH /api/v1/users/{id}/active", s.requireRole(http.HandlerFunc(s.setUserActive), "owner", "admin"))
 	mux.Handle("DELETE /api/v1/users/{id}", s.requireRole(http.HandlerFunc(s.deleteUser), "owner", "admin"))
 
 	// connectors & connections
@@ -81,9 +82,23 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("GET /api/v1/data/summary", s.requireTenant(http.HandlerFunc(s.dataSummary)))
 	mux.Handle("GET /api/v1/data/records", s.requireTenant(http.HandlerFunc(s.dataRecords)))
 	mux.Handle("GET /api/v1/data/synclog", s.requireTenant(http.HandlerFunc(s.syncLog)))
-	mux.Handle("GET /api/v1/reports/summary", s.requireTenant(http.HandlerFunc(s.reportsSummary)))
-	mux.Handle("GET /api/v1/reports/1c", s.requireTenant(http.HandlerFunc(s.reports1C)))
+	mux.Handle("GET /api/v1/reports/bank/balances", s.requireTenant(http.HandlerFunc(s.reportsBankBalances)))
+	mux.Handle("GET /api/v1/settings", s.requireTenant(http.HandlerFunc(s.settingsGet)))
+	mux.Handle("PUT /api/v1/settings/{key}", s.requireRole(http.HandlerFunc(s.settingsPut), "owner", "admin"))
+	mux.Handle("PUT /api/v1/tenant/name", s.requireRole(http.HandlerFunc(s.tenantRename), "owner"))
+	mux.Handle("GET /api/v1/reports/c1/settings", s.requireTenant(http.HandlerFunc(s.c1SettingsGet)))
+	mux.Handle("PUT /api/v1/reports/c1/settings", s.requireRole(http.HandlerFunc(s.c1SettingsPut), "owner", "admin"))
+	mux.Handle("GET /api/v1/reports/c1/menu", s.requireTenant(http.HandlerFunc(s.reportsC1Menu)))
+	mux.Handle("PATCH /api/v1/connections/{id}", s.requireRole(http.HandlerFunc(s.renameConnection), "owner", "admin"))
+	mux.Handle("POST /api/v1/connections/{id}/c1sync", s.requireRole(http.HandlerFunc(s.c1SyncStart), "owner", "admin"))
+	mux.Handle("GET /api/v1/connections/{id}/c1sync", s.requireTenant(http.HandlerFunc(s.c1SyncStatus)))
 	mux.Handle("GET /api/v1/reports/c1/dashboard", s.requireTenant(http.HandlerFunc(s.reportsC1Dashboard)))
+	mux.Handle("GET /api/v1/reports/c1/revenue", s.requireTenant(http.HandlerFunc(s.reportsC1Revenue)))
+	mux.Handle("GET /api/v1/reports/c1/receivables", s.requireTenant(http.HandlerFunc(s.reportsC1Receivables)))
+	mux.Handle("GET /api/v1/reports/c1/payments", s.requireTenant(http.HandlerFunc(s.reportsC1Payments)))
+	mux.Handle("GET /api/v1/reports/c1/customers", s.requireTenant(http.HandlerFunc(s.reportsC1Customers)))
+	mux.Handle("GET /api/v1/reports/c1/customersearch", s.requireTenant(http.HandlerFunc(s.reportsC1CustomerSearch)))
+	mux.Handle("GET /api/v1/reports/c1/customer360", s.requireTenant(http.HandlerFunc(s.reportsC1Customer360)))
 
 	// automations
 	mux.Handle("GET /api/v1/automations", s.requireTenant(http.HandlerFunc(s.listAutomations)))
@@ -270,10 +285,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var userID, pwHash, role, tenantID, tName, tSlug, tDB, tStatus string
-	err = s.Master.QueryRow(ctx, `SELECT u.id, u.password_hash, u.role, t.id, t.name, t.slug, t.db_name, t.status
+	var userActive bool
+	err = s.Master.QueryRow(ctx, `SELECT u.id, u.password_hash, u.role, u.active, t.id, t.name, t.slug, t.db_name, t.status
 		FROM users u JOIN tenants t ON t.id = u.tenant_id
 		WHERE lower(u.email) = $1`, req.Email).
-		Scan(&userID, &pwHash, &role, &tenantID, &tName, &tSlug, &tDB, &tStatus)
+		Scan(&userID, &pwHash, &role, &userActive, &tenantID, &tName, &tSlug, &tDB, &tStatus)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			errJSON(w, 401, "invalid credentials")
@@ -286,6 +302,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 401, "invalid credentials")
 		return
 	}
+	if !userActive {
+		errJSON(w, 403, "Hesab deaktiv edilib — administratorla əlaqə saxlayın")
+		return
+	}
+	s.Master.Exec(ctx, "UPDATE users SET last_login_at=now() WHERE id=$1", userID)
 	if tStatus != "active" {
 		errJSON(w, 403, "tenant is not active")
 		return

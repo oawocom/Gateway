@@ -14,6 +14,10 @@ import (
 type Query struct {
 	From, To         time.Time
 	CustomerID       string // hex _IDRRef; empty = all
+	ServiceID        string // hex _IDRRef of Номенклатура; filters line-based figures
+	ManagerID        string // hex _IDRRef of Пользователи; filters invoice documents
+	ContractID       string // hex _IDRRef of ДоговорыКонтрагентов
+	AggregatorIDs    []string // customer _IDRRefs configured as payment channels (aggregators), not real customers
 	Limit            int
 	DefaultDueDays   int  // used when a contract has no payment term
 	SettleByContract bool // allocate payments per contract instead of per customer
@@ -165,4 +169,39 @@ type Aggregates interface {
 	PaidByNonInvoiced(ctx context.Context, q Query) (float64, error)
 	// DataUntil is the date of the latest posted invoice or payment in the base.
 	DataUntil(ctx context.Context) (time.Time, error)
+	// YearlyRevenue: net revenue and distinct customers per year over the whole
+	// base (From/To ignored; other filters apply). For the year-over-year chart.
+	YearlyRevenue(ctx context.Context, q Query) ([]YearRow, error)
+	// NetByMonth: line-based net revenue per month within [From,To).
+	NetByMonth(ctx context.Context, q Query) ([]MonthNet, error)
+	// NetStats: net total and distinct invoiced customers within [From,To).
+	NetStats(ctx context.Context, q Query) (net float64, customers int, err error)
+	// Managers lists users referenced as responsible on invoices.
+	Managers(ctx context.Context) ([]Ref, error)
+	// CustomerSpans: first and last invoice date per customer, whole base.
+	// Feeds new/lost/net-growth dynamics without a per-month scan.
+	CustomerSpans(ctx context.Context) ([]CustomerSpan, error)
+}
+
+type CustomerSpan struct {
+	CustomerID string    `json:"customer_id"`
+	First      time.Time `json:"first"`
+	Last       time.Time `json:"last"`
+}
+
+type YearRow struct {
+	Year      int     `json:"year"`
+	Net       float64 `json:"net"`
+	Customers int     `json:"customers"`
+}
+
+type MonthNet struct {
+	Year  int     `json:"year"`
+	Month int     `json:"month"`
+	Net   float64 `json:"net"`
+}
+
+type Ref struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }

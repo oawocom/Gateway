@@ -21,6 +21,7 @@ services:
       DATABASE_URL: postgres://gateway:${POSTGRES_PASSWORD}@postgres:5432/gateway_master?sslmode=disable
       HTTP_ADDR: ":8080"
       JWT_SECRET: ${JWT_SECRET}
+      SELF_SIGNUP: ${SELF_SIGNUP:-false}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}

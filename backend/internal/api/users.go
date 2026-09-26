@@ -12,16 +12,18 @@ import (
 var validRoles = map[string]bool{"admin": true, "member": true}
 
 type userRow struct {
-	ID        string    `json:"id"`
-	Email     string    `json:"email"`
-	Role      string    `json:"role"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          string     `json:"id"`
+	Email       string     `json:"email"`
+	Role        string     `json:"role"`
+	Active      bool       `json:"active"`
+	LastLoginAt *time.Time `json:"last_login_at"`
+	CreatedAt   time.Time  `json:"created_at"`
 }
 
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 	claims := r.Context().Value(claimsKey).(*auth.Claims)
 	rows, err := s.Master.Query(r.Context(),
-		"SELECT id, email, role, created_at FROM users WHERE tenant_id=$1 ORDER BY created_at", claims.TenantID)
+		"SELECT id, email, role, active, last_login_at, created_at FROM users WHERE tenant_id=$1 ORDER BY created_at", claims.TenantID)
 	if err != nil {
 		errJSON(w, 500, "db error")
 		return
@@ -30,7 +32,7 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 	list := []userRow{}
 	for rows.Next() {
 		var u userRow
-		if err := rows.Scan(&u.ID, &u.Email, &u.Role, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Role, &u.Active, &u.LastLoginAt, &u.CreatedAt); err != nil {
 			errJSON(w, 500, "db error")
 			return
 		}
@@ -140,4 +142,39 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Master.Exec(r.Context(), "DELETE FROM users WHERE id=$1", id)
 	writeJSON(w, 200, map[string]string{"id": id, "deleted": "true"})
+}
+
+// setUserActive — PATCH /users/{id}/active {active}: deactivate/reactivate.
+// Deactivation blocks login; sessions expire with the token. Owner is
+// untouchable; admins manage members only.
+func (s *Server) setUserActive(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*auth.Claims)
+	id := r.PathValue("id")
+	var req struct {
+		Active bool `json:"active"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errJSON(w, 400, "invalid json")
+		return
+	}
+	if id == claims.Subject {
+		errJSON(w, 400, "öz hesabınızı deaktiv edə bilməzsiniz")
+		return
+	}
+	var targetRole string
+	if err := s.Master.QueryRow(r.Context(),
+		"SELECT role FROM users WHERE id=$1 AND tenant_id=$2", id, claims.TenantID).Scan(&targetRole); err != nil {
+		errJSON(w, 404, "user not found")
+		return
+	}
+	if targetRole == "owner" {
+		errJSON(w, 403, "sahib hesabı deaktiv edilə bilməz")
+		return
+	}
+	if claims.Role == "admin" && targetRole == "admin" {
+		errJSON(w, 403, "adminləri yalnız sahib idarə edir")
+		return
+	}
+	s.Master.Exec(r.Context(), "UPDATE users SET active=$1 WHERE id=$2", req.Active, id)
+	writeJSON(w, 200, map[string]any{"id": id, "active": req.Active})
 }

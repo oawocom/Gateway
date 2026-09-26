@@ -11,6 +11,7 @@ interface AuthState {
   tenant: Tenant | null;
   setTokens: (access: string, refresh: string) => void;
   setSession: (data: { access_token: string; refresh_token: string; user: User; tenant?: Tenant }) => void;
+  renameTenant: (name: string) => void;
   logout: () => void;
 }
 
@@ -29,6 +30,7 @@ export const useAuth = create<AuthState>()(
           user: d.user,
           tenant: d.tenant ?? null,
         }),
+      renameTenant: (name) => set((st) => st.tenant ? { tenant: { ...st.tenant, name } } : {}),
       logout: () => set({ accessToken: null, refreshToken: null, user: null, tenant: null }),
     }),
     { name: "gw-auth" }

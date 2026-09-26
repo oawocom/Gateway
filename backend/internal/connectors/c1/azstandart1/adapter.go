@@ -21,7 +21,15 @@ func init() {
 		func(p *c1meta.Profile) bool {
 			return p.ConfigName == "AzStandart" && c1.MajorVersion(p.ConfigVersion) == 1
 		},
-		New)
+		New,
+		[]c1.ReportDef{
+			{ID: "dashboard", Title: "Rəhbər paneli", Path: "/reports/1c"},
+			{ID: "revenue", Title: "Gəlir Hesabatı", Group: "Maliyyə", Path: "/reports/1c/revenue"},
+			{ID: "receivables", Title: "Debitor Borcları", Group: "Maliyyə", Path: "/reports/1c/receivables"},
+			{ID: "payments", Title: "Ödənişlər / Yığım", Group: "Maliyyə", Path: "/reports/1c/payments"},
+			{ID: "customers", Title: "Müştərilər / TOP", Group: "Müştərilər", Path: "/reports/1c/customers"},
+			{ID: "customer360", Title: "Customer 360°", Group: "Müştərilər", Path: "/reports/1c/customer360"},
+		})
 }
 
 // metadata names used by this configuration family
@@ -154,6 +162,37 @@ func (a *adapter) docFilter(q c1.Query, custCol string, args *[]any) string {
 	return w
 }
 
+// invFilter is docFilter plus invoice-only dimensions (manager, contract).
+func (a *adapter) invFilter(q c1.Query, args *[]any) string {
+	w := a.docFilter(q, a.invCust, args)
+	if q.ManagerID != "" {
+		if b, err := idParam(q.ManagerID); err == nil {
+			*args = append(*args, b)
+			w += fmt.Sprintf(" AND d.[%s] = @p%d", a.invResp, len(*args))
+		}
+	}
+	if q.ContractID != "" {
+		if b, err := idParam(q.ContractID); err == nil {
+			*args = append(*args, b)
+			w += fmt.Sprintf(" AND d.[%s] = @p%d", a.invContr, len(*args))
+		}
+	}
+	return w
+}
+
+// svcCond appends the service (nomenclature) condition for line-based queries.
+func (a *adapter) svcCond(q c1.Query, args *[]any) string {
+	if q.ServiceID == "" {
+		return ""
+	}
+	b, err := idParam(q.ServiceID)
+	if err != nil {
+		return ""
+	}
+	*args = append(*args, b)
+	return fmt.Sprintf(" AND l.[%s] = @p%d", a.vtNomen, len(*args))
+}
+
 // ---- Adapter ----
 
 func (a *adapter) Counts(ctx context.Context) (c1.Counts, error) {
@@ -169,7 +208,7 @@ func (a *adapter) Counts(ctx context.Context) (c1.Counts, error) {
 }
 
 func (a *adapter) Customers(ctx context.Context, q c1.Query) ([]c1.Customer, error) {
-	sqlq := fmt.Sprintf(`SELECT %s_IDRRef, _Code, _Description, [%s], [%s], _Folder, _Marked
+	sqlq := fmt.Sprintf(`SELECT %s_IDRRef, coalesce(_Code,''), coalesce(_Description,''), coalesce([%s],''), coalesce([%s],''), _Folder, _Marked
 		FROM [%s] ORDER BY _Description`, top(q.Limit), a.custFull, a.custINN, a.tCust)
 	rows, err := a.db.QueryContext(ctx, sqlq)
 	if err != nil {

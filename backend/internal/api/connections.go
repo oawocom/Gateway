@@ -25,6 +25,7 @@ type connRow struct {
 	ID            string     `json:"id"`
 	Name          string     `json:"name"`
 	ConnectorType string     `json:"connector_type"`
+	Source        string     `json:"source"`
 	Status        string     `json:"status"`
 	LastSyncAt    *time.Time `json:"last_sync_at"`
 	LastError     *string    `json:"last_error"`
@@ -38,7 +39,7 @@ func (s *Server) listConnections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := tdb.Query(r.Context(),
-		"SELECT id, name, connector_type, status, last_sync_at, last_error, created_at FROM connections ORDER BY created_at DESC")
+		"SELECT id, name, connector_type, source, status, last_sync_at, last_error, created_at FROM connections ORDER BY created_at DESC")
 	if err != nil {
 		errJSON(w, 500, "db error")
 		return
@@ -47,7 +48,7 @@ func (s *Server) listConnections(w http.ResponseWriter, r *http.Request) {
 	list := []connRow{}
 	for rows.Next() {
 		var c connRow
-		if err := rows.Scan(&c.ID, &c.Name, &c.ConnectorType, &c.Status, &c.LastSyncAt, &c.LastError, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.ConnectorType, &c.Source, &c.Status, &c.LastSyncAt, &c.LastError, &c.CreatedAt); err != nil {
 			errJSON(w, 500, "db error")
 			return
 		}
@@ -60,6 +61,7 @@ type connCreateReq struct {
 	Name          string            `json:"name"`
 	ConnectorType string            `json:"connector_type"`
 	Config        map[string]string `json:"config"`
+	Source        string            `json:"source"`
 }
 
 func validateConfig(req *connCreateReq) (string, bool) {
@@ -179,6 +181,14 @@ func (s *Server) createConnection(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 400, "Bağlantı testi uğursuz: "+err.Error())
 		return
 	}
+	// origin integration: 1C-native types always belong to the 1C card;
+	// the wizard also marks its mssql/postgres connections as "1c".
+	if req.ConnectorType == "1c_odata" || req.ConnectorType == "1c_http" {
+		req.Source = "1c"
+	}
+	if req.Source != "" && req.Source != "1c" {
+		req.Source = ""
+	}
 
 	cfgJSON, err := json.Marshal(req.Config)
 	if err != nil {
@@ -198,8 +208,8 @@ func (s *Server) createConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	var id string
 	err = tdb.QueryRow(r.Context(),
-		"INSERT INTO connections (name, connector_type, config_enc) VALUES ($1,$2,$3) RETURNING id",
-		req.Name, req.ConnectorType, enc).Scan(&id)
+		"INSERT INTO connections (name, connector_type, config_enc, source) VALUES ($1,$2,$3,$4) RETURNING id",
+		req.Name, req.ConnectorType, enc, req.Source).Scan(&id)
 	if err != nil {
 		errJSON(w, 500, "could not create connection")
 		return
@@ -415,4 +425,32 @@ func (s *Server) deleteConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]string{"id": id, "deleted": "true"})
+}
+
+// renameConnection — PATCH /connections/{id}: change the display name (it
+// titles the report accordion in the sidebar).
+func (s *Server) renameConnection(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Name) == "" {
+		errJSON(w, 400, "ad boş ola bilməz")
+		return
+	}
+	tdb, _, err := s.tenantPool(r)
+	if err != nil {
+		errJSON(w, 500, "tenant db error")
+		return
+	}
+	ct, err := tdb.Exec(r.Context(), `UPDATE connections SET name=$1 WHERE id=$2`, strings.TrimSpace(req.Name), id)
+	if err != nil {
+		errJSON(w, 500, "db error")
+		return
+	}
+	if ct.RowsAffected() == 0 {
+		errJSON(w, 404, "bağlantı tapılmadı")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
 }

@@ -12,10 +12,15 @@ import AdminUsers from "./pages/admin/AdminUsers";
 import AppLayout from "./layouts/AppLayout";
 import Home from "./pages/app/Home";
 import Integrations from "./pages/app/Integrations";
+import ConnectorDetail from "./pages/app/ConnectorDetail";
 import Connections from "./pages/app/Connections";
 import Data from "./pages/app/Data";
-import Reports from "./pages/app/Reports";
 import Dashboard1C from "./pages/app/Dashboard1C";
+import Revenue1C from "./pages/app/Revenue1C";
+import Receivables1C from "./pages/app/Receivables1C";
+import Payments1C from "./pages/app/Payments1C";
+import Customers1C from "./pages/app/Customers1C";
+import Customer360 from "./pages/app/Customer360";
 import Automations from "./pages/app/Automations";
 import Users from "./pages/app/Users";
 import Settings from "./pages/app/Settings";
@@ -35,10 +40,15 @@ export default function App() {
               <Route element={<AppLayout />}>
                 <Route path="/" element={<Home />} />
                 <Route path="/integrations" element={<Integrations />} />
+                <Route path="/integrations/:type" element={<ConnectorDetail />} />
                 <Route path="/connections" element={<Connections />} />
                 <Route path="/data" element={<Data />} />
-                <Route path="/reports" element={<Reports />} />
                 <Route path="/reports/1c" element={<Dashboard1C />} />
+                <Route path="/reports/1c/revenue" element={<Revenue1C />} />
+                <Route path="/reports/1c/receivables" element={<Receivables1C />} />
+                <Route path="/reports/1c/payments" element={<Payments1C />} />
+                <Route path="/reports/1c/customers" element={<Customers1C />} />
+                <Route path="/reports/1c/customer360" element={<Customer360 />} />
                 <Route path="/automations" element={<Automations />} />
                 <Route path="/users" element={<Users />} />
                 <Route path="/settings" element={<Settings />} />

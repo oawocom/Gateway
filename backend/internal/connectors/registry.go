@@ -16,16 +16,25 @@ type Descriptor struct {
 	Description string        `json:"description"`
 	Category    string        `json:"category"`
 	Available   bool          `json:"available"`
+	Hidden      bool          `json:"hidden,omitempty"` // not shown as a card; fields still used by wizards
 	Fields      []ConfigField `json:"fields,omitempty"`
 }
 
 var Catalog = []Descriptor{
+	{
+		Type:        "1c",
+		Name:        "1C",
+		Description: "1C bazanızı Gateway-ə qoşun: versiyanı seçin, sistem qoşulma üsulunu özü təyin etsin. Hesabatlar qoşulmadan sonra avtomatik açılır.",
+		Category:    "ERP / Mühasibat",
+		Available:   true,
+	},
 	{
 		Type:        "1c_odata",
 		Name:        "1C (OData, v8.3.5+)",
 		Description: "Müasir 1C (8.3.5 və yuxarı) üçün standart OData interfeysi. Kataloqlar, sənədlər və registrlərə tam çıxış.",
 		Category:    "ERP / Mühasibat",
 		Available:   true,
+		Hidden:      true,
 		Fields: []ConfigField{
 			{Key: "base_url", Label: "Publikasiya URL", Type: "url", Required: true, Hint: "məs. http://server/base (odata yolu avtomatik əlavə olunur)"},
 			{Key: "username", Label: "İstifadəçi adı", Type: "text", Required: true},
@@ -38,6 +47,7 @@ var Catalog = []Descriptor{
 		Description: "OData olmayan və ya köhnə 1C üçün: bazada publikasiya olunmuş xüsusi HTTP servislərdən data çəkir.",
 		Category:    "ERP / Mühasibat",
 		Available:   true,
+		Hidden:      true,
 		Fields: []ConfigField{
 			{Key: "base_url", Label: "Publikasiya URL", Type: "url", Required: true, Hint: "məs. http://server/base"},
 			{Key: "username", Label: "İstifadəçi adı", Type: "text", Required: true},
@@ -96,7 +106,7 @@ var Catalog = []Descriptor{
 	{
 		Type:        "kapital_bank",
 		Name:        "Kapital Bank (Birbank Biznes)",
-		Description: "Kapital Bank açıq API — bağlantı və token qoşulması. Hesab/çıxarış sinxronizasiyası tezliklə aktivləşir.",
+		Description: "Kapital Bank (Birbank Biznes) açıq API — hesab qalıqları və çıxarışlar Gateway-də. Token bank portalından verilir.",
 		Category:    "Bank",
 		Available:   true,
 		Fields: []ConfigField{

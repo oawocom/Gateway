@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useAuth } from "../store/auth";
 import AuthLayout from "../components/AuthLayout";
 import PasswordInput from "../components/PasswordInput";
 
 export default function Login() {
+  const qc = useQueryClient();
   const nav = useNavigate();
   const setSession = useAuth((s) => s.setSession);
   const [email, setEmail] = useState("");
@@ -20,6 +22,7 @@ export default function Login() {
     try {
       const { data } = await api.post("/auth/login", { email, password });
       setSession(data);
+      qc.clear(); // heç bir əvvəlki sessiyanın keşi yeni sessiyaya keçməsin
       nav(data.user?.role === "superadmin" ? "/admin" : "/");
     } catch (err: any) {
       setError(err.response?.data?.error === "invalid credentials"

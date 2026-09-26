@@ -59,11 +59,17 @@ func (s *Server) reportsC1Dashboard(w http.ResponseWriter, r *http.Request) {
 	if t, e := time.Parse("2006-01-02", qs.Get("to")); e == nil {
 		to = t
 	}
-	dueDays := 30
+	ruleDue, ruleSettle := s.c1Rules(r)
+	dueDays := ruleDue
 	if d, e := parseInt(qs.Get("due_days")); e == nil && d > 0 {
 		dueDays = d
 	}
-	q := c1.Query{From: from, To: to, CustomerID: qs.Get("customer"), DefaultDueDays: dueDays, SettleByContract: qs.Get("settle") == "contract"}
+	settle := ruleSettle
+	if v := qs.Get("settle"); v != "" {
+		settle = v == "contract"
+	}
+	q := c1.Query{From: from, To: to, CustomerID: qs.Get("customer"), DefaultDueDays: dueDays, SettleByContract: settle}
+	q.AggregatorIDs = s.c1AggIDs(r, connID)
 
 	monthly, err := ag.Monthly(ctx, q)
 	if err != nil {
