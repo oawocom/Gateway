@@ -18,7 +18,8 @@ const groups = [
     label: "Data",
     items: [
       { to: "/data", label: "Data mərkəzi", icon: Ic.db },
-      { to: "/reports", label: "Hesabatlar", icon: Ic.activity },
+      { to: "/reports", label: "Hesabatlar", icon: Ic.activity, end: true },
+      { to: "/reports/1c", label: "Rəhbər paneli (1C)", icon: Ic.building },
       { to: "/automations", label: "Avtomatlaşdırma", icon: Ic.zap },
     ],
   },

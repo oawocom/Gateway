@@ -15,6 +15,7 @@ import Integrations from "./pages/app/Integrations";
 import Connections from "./pages/app/Connections";
 import Data from "./pages/app/Data";
 import Reports from "./pages/app/Reports";
+import Dashboard1C from "./pages/app/Dashboard1C";
 import Automations from "./pages/app/Automations";
 import Users from "./pages/app/Users";
 import Settings from "./pages/app/Settings";
@@ -37,6 +38,7 @@ export default function App() {
                 <Route path="/connections" element={<Connections />} />
                 <Route path="/data" element={<Data />} />
                 <Route path="/reports" element={<Reports />} />
+                <Route path="/reports/1c" element={<Dashboard1C />} />
                 <Route path="/automations" element={<Automations />} />
                 <Route path="/users" element={<Users />} />
                 <Route path="/settings" element={<Settings />} />
