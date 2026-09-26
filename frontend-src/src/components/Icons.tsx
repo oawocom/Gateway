@@ -38,4 +38,8 @@ export const connMeta: Record<string, { icon: string; tint: string }> = {
   mysql: { icon: "🐬", tint: "#e6f4ff" },
   mssql: { icon: "🗄️", tint: "#fde9ec" },
   zoho_crm: { icon: "📊", tint: "#ffe9e0" },
+  pasha_bank: { icon: "🏦", tint: "#e8f5ec" },
+  kapital_bank: { icon: "🏦", tint: "#fdecec" },
+  epoint: { icon: "💳", tint: "#eef2fd" },
+  yigim: { icon: "💰", tint: "#fdf6e4" },
 };

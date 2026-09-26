@@ -82,6 +82,51 @@ var Catalog = []Descriptor{
 			{Key: "refresh_token", Label: "Refresh Token", Type: "password", Required: true, Hint: "Self Client grant kodundan alınmış refresh token"},
 		},
 	},
+	{
+		Type:        "pasha_bank",
+		Name:        "PASHA Bank",
+		Description: "PASHA Bank Open Banking API — biznes hesab qalıqları və çıxarışlar birbaşa Gateway-də. Token bank tərəfindən verilir.",
+		Category:    "Bank",
+		Available:   true,
+		Fields: []ConfigField{
+			{Key: "base_url", Label: "API mühiti (URL)", Type: "url", Required: false, Hint: "boş = canlı mühit; sandbox üçün: https://sandbox.pashabank.digital"},
+			{Key: "token", Label: "API Token", Type: "password", Required: true, Hint: "PASHA Bank B2B inteqrasiya müqaviləsi ilə verilən token"},
+		},
+	},
+	{
+		Type:        "kapital_bank",
+		Name:        "Kapital Bank (Birbank Biznes)",
+		Description: "Kapital Bank açıq API — bağlantı və token qoşulması. Hesab/çıxarış sinxronizasiyası tezliklə aktivləşir.",
+		Category:    "Bank",
+		Available:   true,
+		Fields: []ConfigField{
+			{Key: "base_url", Label: "API URL", Type: "url", Required: false, Hint: "boş = https://my.birbank.business/b2b/api/public/v1"},
+			{Key: "token", Label: "API Token", Type: "password", Required: true, Hint: "api.birbank.business portalından alınan token"},
+		},
+	},
+	{
+		Type:        "epoint",
+		Name:        "EPoint",
+		Description: "EPoint ödəniş sistemi — açarlarla qoşulma və yoxlama. Əməliyyat sinxronizasiyası tezliklə aktivləşir.",
+		Category:    "Ödəniş sistemləri",
+		Available:   true,
+		Fields: []ConfigField{
+			{Key: "public_key", Label: "Public Key", Type: "text", Required: true},
+			{Key: "private_key", Label: "Private Key", Type: "password", Required: true},
+		},
+	},
+	{
+		Type:        "yigim",
+		Name:        "YIĞIM",
+		Description: "YIĞIM ödəniş aqreqatoru — merchant qoşulması. Ödəniş sinxronizasiyası tezliklə aktivləşir.",
+		Category:    "Ödəniş sistemləri",
+		Available:   true,
+		Fields: []ConfigField{
+			{Key: "base_url", Label: "API URL", Type: "url", Required: false, Hint: "boş = https://api.yigim.az"},
+			{Key: "merchant", Label: "Merchant kodu", Type: "text", Required: true},
+			{Key: "secret_key", Label: "Secret Key", Type: "password", Required: true},
+		},
+	},
 }
 
 func Get(connType string) *Descriptor {

@@ -10,6 +10,7 @@ import (
 
 	"gateway/internal/connectors/http1c"
 	"gateway/internal/connectors/odata1c"
+	"gateway/internal/connectors/pashabank"
 	"gateway/internal/connectors/sqldb"
 	"gateway/internal/connectors/zoho"
 	"gateway/internal/crypto"
@@ -105,6 +106,42 @@ func (s *Syncer) SyncEntity(ctx context.Context, tdb *pgxpool.Pool, connectionID
 				break
 			}
 			total++
+		}
+	case "pasha_bank":
+		var cfg pashabank.Config
+		if err := s.LoadConfig(configEnc, &cfg); err != nil {
+			syncErr = err
+			break
+		}
+		client := pashabank.New(cfg)
+		page := 0
+		for {
+			recs, more, err := client.FetchPage(entity, page, 200)
+			if err != nil {
+				syncErr = err
+				break
+			}
+			for i, rec := range recs {
+				data, err := json.Marshal(rec)
+				if err != nil {
+					continue
+				}
+				extID := pashabank.ExternalID(rec, fmt.Sprintf("row_%d_%d", page, i))
+				if _, err := tdb.Exec(ctx, `
+					INSERT INTO records (connection_id, entity_name, external_id, data, synced_at)
+					VALUES ($1,$2,$3,$4,now())
+					ON CONFLICT (connection_id, entity_name, external_id)
+					DO UPDATE SET data=EXCLUDED.data, synced_at=now()`,
+					connectionID, entity, extID, data); err != nil {
+					syncErr = err
+					break
+				}
+				total++
+			}
+			if syncErr != nil || !more || total >= maxRecordsPerSync {
+				break
+			}
+			page++
 		}
 	case "postgres", "mysql", "mssql":
 		var cfg sqldb.Config

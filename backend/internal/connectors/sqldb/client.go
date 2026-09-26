@@ -3,6 +3,7 @@ package sqldb
 import (
 	"crypto/md5"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -257,7 +259,12 @@ func (c *Client) FetchPage(table string, top, skip int) (recs []map[string]any, 
 func normalize(v any) any {
 	switch x := v.(type) {
 	case []byte:
-		return string(x)
+		if utf8.Valid(x) {
+			return strings.ReplaceAll(string(x), "\x00", "")
+		}
+		return base64.StdEncoding.EncodeToString(x)
+	case string:
+		return strings.ToValidUTF8(strings.ReplaceAll(x, "\x00", ""), "")
 	case time.Time:
 		return x.Format(time.RFC3339)
 	default:
@@ -278,3 +285,6 @@ func externalID(rec map[string]any, pks []string) string {
 	h := md5.Sum(b)
 	return hex.EncodeToString(h[:])
 }
+
+// Open exposes a raw database handle for advanced read-only reporting queries.
+func (c *Client) Open() (*sql.DB, error) { return c.open() }

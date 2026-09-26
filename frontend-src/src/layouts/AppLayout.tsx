@@ -18,6 +18,7 @@ const groups = [
     label: "Data",
     items: [
       { to: "/data", label: "Data mərkəzi", icon: Ic.db },
+      { to: "/reports", label: "Hesabatlar", icon: Ic.activity },
       { to: "/automations", label: "Avtomatlaşdırma", icon: Ic.zap },
     ],
   },

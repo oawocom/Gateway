@@ -9,7 +9,11 @@ import (
 	"gateway/internal/connectors"
 	"gateway/internal/connectors/http1c"
 	"gateway/internal/connectors/odata1c"
+	"gateway/internal/connectors/epoint"
+	"gateway/internal/connectors/kapitalbank"
+	"gateway/internal/connectors/pashabank"
 	"gateway/internal/connectors/sqldb"
+	"gateway/internal/connectors/yigim"
 	"gateway/internal/connectors/zoho"
 )
 
@@ -92,6 +96,27 @@ func buildClient(req *connCreateReq) (interface{ Test() error }, error) {
 			ClientID:     req.Config["client_id"],
 			ClientSecret: req.Config["client_secret"],
 			RefreshToken: req.Config["refresh_token"],
+		}), nil
+	case "epoint":
+		return epoint.New(epoint.Config{
+			PublicKey:  req.Config["public_key"],
+			PrivateKey: req.Config["private_key"],
+		}), nil
+	case "yigim":
+		return yigim.New(yigim.Config{
+			BaseURL:   req.Config["base_url"],
+			Merchant:  req.Config["merchant"],
+			SecretKey: req.Config["secret_key"],
+		}), nil
+	case "kapital_bank":
+		return kapitalbank.New(kapitalbank.Config{
+			BaseURL: req.Config["base_url"],
+			Token:   req.Config["token"],
+		}), nil
+	case "pasha_bank":
+		return pashabank.New(pashabank.Config{
+			BaseURL: req.Config["base_url"],
+			Token:   req.Config["token"],
 		}), nil
 	case "postgres", "mysql", "mssql":
 		return sqldb.New(req.ConnectorType, sqldb.Config{
@@ -223,6 +248,34 @@ func (s *Server) testConnection(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		client = zoho.New(cfg)
+	case "pasha_bank":
+		var cfg pashabank.Config
+		if err := s.Sync.LoadConfig(enc, &cfg); err != nil {
+			errJSON(w, 500, "config error")
+			return
+		}
+		client = pashabank.New(cfg)
+	case "kapital_bank":
+		var cfg kapitalbank.Config
+		if err := s.Sync.LoadConfig(enc, &cfg); err != nil {
+			errJSON(w, 500, "config error")
+			return
+		}
+		client = kapitalbank.New(cfg)
+	case "epoint":
+		var cfg epoint.Config
+		if err := s.Sync.LoadConfig(enc, &cfg); err != nil {
+			errJSON(w, 500, "config error")
+			return
+		}
+		client = epoint.New(cfg)
+	case "yigim":
+		var cfg yigim.Config
+		if err := s.Sync.LoadConfig(enc, &cfg); err != nil {
+			errJSON(w, 500, "config error")
+			return
+		}
+		client = yigim.New(cfg)
 	case "postgres", "mysql", "mssql":
 		var cfg sqldb.Config
 		if err := s.Sync.LoadConfig(enc, &cfg); err != nil {
@@ -271,6 +324,34 @@ func (s *Server) listConnectionEntities(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		lister = zoho.New(cfg)
+	case "pasha_bank":
+		var cfg pashabank.Config
+		if err := s.Sync.LoadConfig(enc, &cfg); err != nil {
+			errJSON(w, 500, "config error")
+			return
+		}
+		lister = pashabank.New(cfg)
+	case "kapital_bank":
+		var cfg kapitalbank.Config
+		if err := s.Sync.LoadConfig(enc, &cfg); err != nil {
+			errJSON(w, 500, "config error")
+			return
+		}
+		lister = kapitalbank.New(cfg)
+	case "epoint":
+		var cfg epoint.Config
+		if err := s.Sync.LoadConfig(enc, &cfg); err != nil {
+			errJSON(w, 500, "config error")
+			return
+		}
+		lister = epoint.New(cfg)
+	case "yigim":
+		var cfg yigim.Config
+		if err := s.Sync.LoadConfig(enc, &cfg); err != nil {
+			errJSON(w, 500, "config error")
+			return
+		}
+		lister = yigim.New(cfg)
 	case "postgres", "mysql", "mssql":
 		var cfg sqldb.Config
 		if err := s.Sync.LoadConfig(enc, &cfg); err != nil {
